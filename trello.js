@@ -1,91 +1,186 @@
-import fs from 'fs';
-import fetch from 'node-fetch';
+import fs from 'fs'
+import fetch from 'node-fetch'
+import path from 'path'
 import dotenv from 'dotenv'
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath } from 'url'
+import { mixingDescriptionWithTemplate, readAttachments } from './openai.js'
 
 dotenv.config()
-const id = 'G3ySs7FU';
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const downloadsDir = path.join(__dirname, 'downloads');
+
+const signature = `${process.env.secret}&${process.env.token}`
+const timestamp = Math.floor(Date.now() / 1000)
+const nonce = Math.random().toString(36).substring(2) + Date.now().toString(36)
+const id = 'dbBwzQ00'
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+const downloadsDir = path.join(__dirname, 'downloads')
 if (!fs.existsSync(downloadsDir)) {
-  fs.mkdirSync(downloadsDir);
+  fs.mkdirSync(downloadsDir)
 }
 
-async function getCardId(id) {
+// async function getCardId(id) {
+//   try {
+//     const response = await fetch(
+//       `https://api.trello.com/1/cards/${id}?key=${process.env.apiKey}&token=${process.env.token}`,
+//       {
+//         method: 'GET',
+//         headers: {
+//           Accept: 'application/json',
+//         },
+//       },
+//     )
+//     const data = await response.json()
+//     return data.id
+//   } catch (error) {
+//     console.error(error)
+//   }
+// }
+
+async function getCardDesc(id) {
   try {
-    const response = await fetch(`https://api.trello.com/1/cards/${id}?key=${process.env.apiKey}&token=${process.env.token}`, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json'
-      }
-    });
-    const data = await response.json();
-    return data.id;
+    const response = await fetch(
+      `https://api.trello.com/1/cards/${id}?key=${process.env.apiKey}&token=${process.env.token}`,
+      {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+        },
+      },
+    )
+    const data = await response.json()
+    return data.desc
   } catch (error) {
-    console.error(error);
+    console.error(error)
   }
 }
 
 async function editCard(cardId, description) {
   try {
-    const response = await fetch(`https://api.trello.com/1/cards/${cardId}?key=${process.apiKey}&token=${process.env.token}`, {
-      method: 'PUT',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json'
+    const response = await fetch(
+      `https://api.trello.com/1/cards/${cardId}?key=${process.env.apiKey}&token=${process.env.token}`,
+      {
+        method: 'PUT',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          desc: description,
+        }),
       },
-      body: JSON.stringify({
-        desc: description
-      })
-    });
+    )
     if (!response.ok) {
-      throw new Error(`Error: ${response.status} ${response.statusText}`);
+      throw new Error(`Error: ${response.status} ${response.statusText}`)
     }
-    const data = await response.json();
   } catch (err) {
-    console.error('Erro ao atualizar a descricao', err);
+    console.error('Erro ao atualizar a descrição', err)
   }
 }
 
 async function getAttachments(cardId) {
   try {
-    const response = await fetch(`https://api.trello.com/1/cards/${cardId}/attachments?key=${process.env.apiKey}&token=${process.env.token}`, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json'
-      }
-    });
-    const data = await response.json();
-    return data;
+    const response = await fetch(
+      `https://api.trello.com/1/cards/${cardId}/attachments?key=${process.env.apiKey}&token=${process.env.token}`,
+      {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+        },
+      },
+    )
+    const data = await response.json()
+
+    return data
   } catch (error) {
-    console.error('Error to get attachments', error);
+    console.error('Erro ao obter anexos', error)
   }
 }
 
 async function downloadAttachment(url, filename) {
-  const response = await fetch(url);
-  const buffer = await response.buffer();
-  const filePath = path.join(downloadsDir, filename)
-  fs.writeFileSync(filePath, buffer);
-  console.log(`Downloaded ${filename} to ${filePath}`);
+  try {
+    //  const response =  await client.get(url)
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `OAuth oauth_consumer_key="${process.env.apiKey}", oauth_token="${process.env.token}", oauth_signature_method="HMAC-SHA1", oauth_timestamp="${timestamp}", oauth_nonce="${nonce}", oauth_version="1.0", oauth_signature="${signature}"`,
+      },
+    })
+    if (!response.ok) {
+      throw new Error(`Failed to fetch ${url}: ${response.statusText}`)
+    }
+    const buffer = await response.buffer()
+    // const filePath = path.join(downloadsDir, `${Math.floor(Math.random() * 20)}${filename}`);
+    const filePath = path.join(downloadsDir, filename)
+    fs.writeFileSync(filePath, buffer)
+    console.log(`Downloaded ${filename} to ${filePath}`)
+  } catch (error) {
+    console.error(`Erro ao baixar o anexo ${filename}`, error)
+  }
 }
 
 async function downloadAllAttachments(cardId) {
-  const attachments = await getAttachments(cardId);
-  for (const attachment of attachments) {
-    const url = attachment.url;
-    const filename = attachment.name;
-    await downloadAttachment(url, filename);
+  try {
+    const attachments = await getAttachments(cardId)
+    if (attachments && attachments.length > 0) {
+      for (const attachment of attachments) {
+        const url = attachment.url
+        const filename = attachment.name
+        await downloadAttachment(url, filename)
+      }
+    } else {
+      console.log('Nenhum anexo encontrado.')
+    }
+  } catch (error) {
+    console.error('Erro ao baixar todos os anexos', error)
   }
 }
 
 async function main() {
-  const cardId = await getCardId(id);
-  const newDescription = ``;
-  // await editCard(cardId, newDescription);
-  await downloadAllAttachments(cardId);
+  try {
+    const description = await getCardDesc(id)
+    await downloadAllAttachments(id)
+    const downloadsDir = './downloads/'
+
+    if (!fs.existsSync(downloadsDir)) {
+      throw new Error(`Directory not found: ${downloadsDir}`)
+    }
+
+    const imageFiles = fs.readdirSync(downloadsDir).filter((file) => {
+      return (
+        file.endsWith('.png') ||
+        file.endsWith('.jpg') ||
+        file.endsWith('.jpeg') ||
+        file.endsWith('.pdf')
+      )
+    })
+
+    if (imageFiles.length === 0) {
+      console.log(`No images found in the directory: ${downloadsDir}`)
+      throw new Error(`No images found in the directory: ${downloadsDir}`)
+    }
+    const images = imageFiles.map((file) => {
+      const imagePath = path.join(downloadsDir, file)
+      return fs.readFileSync(imagePath)
+    })
+
+    const documentsInfo = await readAttachments(images)
+
+    if (!documentsInfo) {
+      throw new Error('Falha ao extrair informações do documento')
+    }
+
+    const newDescription = await mixingDescriptionWithTemplate(
+      description,
+      documentsInfo,
+    )
+
+    if (!newDescription) {
+      throw new Error('Falha ao gerar nova descrição')
+    }
+
+    await editCard(id, `${description} \n ********* \n ${newDescription}`)
+  } catch (error) {
+    console.error('Erro no processo principal', error)
+  }
 }
 
-main();
+main()
